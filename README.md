@@ -1,10 +1,10 @@
-# 🚀 API de Demonstração — Esteira CI/CD (Seminário N2)
+# API de Demonstração — Esteira CI/CD (Seminário N2)
 
 > Projeto desenvolvido para a disciplina de Engenharia de Software / DevOps, demonstrando a substituição completa do **Gitea** por uma plataforma integrada de CI/CD (ex: **GitLab** ou **GitHub**).
 
 ---
 
-## 📌 1. Visão Geral do Cenário
+## 1. Visão Geral do Cenário
 
 Esta aplicação é uma **API RESTful desenvolvida em Node.js com Express**, estruturada para servir de carga de trabalho real em uma esteira de Integração Contínua e Entrega Contínua (CI/CD).
 
@@ -12,7 +12,7 @@ A API gerencia tarefas e expõe métricas de integridade (*Health Check*), simul
 
 ---
 
-## 🛠️ 2. Especificação das Rotas e Endpoints
+## 2. Especificação das Rotas e Endpoints
 
 | Método | Rota | Descrição | Status de Sucesso |
 | :--- | :--- | :--- | :--- |
@@ -24,7 +24,7 @@ A API gerencia tarefas e expõe métricas de integridade (*Health Check*), simul
 
 ---
 
-## 🔄 3. Como a API se Conecta aos 5 Requisitos do Seminário
+## 3. Como a API se Conecta aos 5 Requisitos do Seminário
 
 Esta base de código foi projetada para alimentar diretamente os 5 pilares exigidos pelo professor:
 
@@ -41,7 +41,7 @@ Esta base de código foi projetada para alimentar diretamente os 5 pilares exigi
 
 ---
 
-## 💻 4. Execução Local
+## 4. Execução Local
 
 ### Pré-requisitos
 * Node.js 18+ ou 20+ instalado.
@@ -62,7 +62,7 @@ A API estará acessível em: `http://localhost:3000`
 
 ---
 
-## 🐳 5. Execução via Docker (Local)
+## 5. Execução via Docker (Local)
 
 Para testar o empacotamento antes de rodar na esteira:
 
@@ -79,7 +79,7 @@ curl http://localhost:3000/health
 
 ---
 
-## 🌿 6. Estrutura de Branches Recomendada
+## 6. Estrutura de Branches Recomendada
 
 * `main`: Código estável em produção. Protegida contra commits diretos (exige Pull/Merge Request e aprovação do pipeline de testes).
 * `develop` / `feature/*`: Branches de desenvolvimento onde os integrantes enviam novas alterações.
