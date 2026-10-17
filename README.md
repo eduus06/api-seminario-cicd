@@ -1,4 +1,4 @@
-# 🚀 API de Demonstração, Esteira CI/CD (Seminário N2)
+# 🚀 API de Demonstração — Esteira CI/CD (Seminário N2)
 
 > Projeto desenvolvido para a disciplina de Engenharia de Software / DevOps, demonstrando a substituição completa do **Gitea** por uma plataforma integrada de CI/CD (ex: **GitLab** ou **GitHub**).
 
