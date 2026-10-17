@@ -1,0 +1,28 @@
+{
+  "name": "api-seminario-cicd",
+  "version": "1.0.0",
+  "description": "API REST de exemplo para demonstração de fluxo CI/CD em substituição ao Gitea",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "jest --runInBand --detectOpenHandles"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4"
+  },
+  "keywords": [
+    "api",
+    "express",
+    "docker",
+    "ci-cd",
+    "seminario"
+  ],
+  "author": "Eduardo & Equipe",
+  "license": "MIT"
+}
