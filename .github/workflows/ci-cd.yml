@@ -1,0 +1,149 @@
+name: Esteira CI/CD - API Seminario
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  CONTAINER_NAME: api-seminario-cicd
+  HOST_PORT: 3000
+  CONTAINER_PORT: 3000
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  testes:
+    name: "1. Testes Automatizados (Req 3)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código-fonte (Requisito 1)
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências de forma limpa
+        run: npm ci
+
+      - name: Executar suíte de testes (Jest + Supertest)
+        run: npm test
+
+  build-docker:
+    name: "2. Build Imagem Docker (Req 2) & Registry (Req 4)"
+    needs: testes
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.meta.outputs.image_name }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - name: Checkout do código-fonte
+        uses: actions/checkout@v4
+
+      - name: Definir metadados e normalizar nome da imagem em minúsculas
+        id: meta
+        run: |
+          IMAGE_LOWER="$(echo "${{ env.REGISTRY }}/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          SHORT_SHA="$(echo "${{ github.sha }}" | cut -c1-7)"
+          echo "image_name=${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir imagem Docker otimizada (Requisito 2)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: |
+            ${{ steps.meta.outputs.image_name }}:latest
+            ${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Inspecionar imagem Docker construída (Validação do Requisito 2)
+        run: |
+          echo "=== Imagens construídas no passo de Build ==="
+          docker images "${{ steps.meta.outputs.image_name }}"
+
+      - name: Exportar imagem como artefato para o estágio de Deploy
+        run: |
+          docker save "${{ steps.meta.outputs.image_name }}:latest" -o /tmp/api-seminario-cicd.tar
+
+      - name: Publicar artefato da imagem para o job de Deploy
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-artifact
+          path: /tmp/api-seminario-cicd.tar
+          retention-days: 1
+
+      - name: Autenticar no GitHub Container Registry (Requisito 4)
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar imagem no Container Registry (Requisito 4)
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push "${{ steps.meta.outputs.image_name }}:latest"
+          docker push "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}"
+
+  deploy:
+    name: "3. Deploy Automatizado & Health Check (Req 5)"
+    needs: build-docker
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código-fonte (obter scripts/deploy.sh)
+        uses: actions/checkout@v4
+
+      - name: Baixar artefato da imagem Docker construída no Estágio 2
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-artifact
+          path: /tmp
+
+      - name: Carregar imagem Docker no ambiente de execução
+        run: |
+          docker load -i /tmp/api-seminario-cicd.tar
+
+      - name: Garantir permissão de execução no script de Deploy
+        run: chmod +x ./scripts/deploy.sh
+
+      - name: Executar script de Deploy Automatizado (Requisito 5)
+        env:
+          IMAGE_NAME: ${{ needs.build-docker.outputs.image_name }}
+          IMAGE_TAG: "latest"
+          CONTAINER_NAME: ${{ env.CONTAINER_NAME }}
+          HOST_PORT: ${{ env.HOST_PORT }}
+          CONTAINER_PORT: ${{ env.CONTAINER_PORT }}
+          SKIP_PULL: "true"
+        run: |
+          ./scripts/deploy.sh
+
+      - name: Verificação final dos endpoints publicados (/health e /api/info)
+        run: |
+          echo "=== Teste de Fumaca Pós-Deploy (/api/info) ==="
+          curl -fsS "http://localhost:${{ env.HOST_PORT }}/api/info"
+          echo ""
+          echo "=== Status do Container em Execução ==="
+          docker ps --filter "name=${{ env.CONTAINER_NAME }}"
