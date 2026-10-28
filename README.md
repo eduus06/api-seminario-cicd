@@ -1,6 +1,8 @@
 # API de Demonstração — Esteira CI/CD (Seminário N2)
 
-> Projeto desenvolvido para a disciplina de Engenharia de Software / DevOps, demonstrando a substituição completa do **Gitea** por uma plataforma integrada de CI/CD (ex: **GitLab** ou **GitHub**).
+[![Esteira CI/CD - API Seminario](https://github.com/eduus06/api-seminario-cicd/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/eduus06/api-seminario-cicd/actions/workflows/ci-cd.yml)
+
+> Projeto desenvolvido para a disciplina de Engenharia de Software & DevOps, demonstrando a substituição completa do **Gitea** pelo ecossistema integrado **GitHub + GitHub Actions + GitHub Container Registry (GHCR)** com deploy automatizado e health check.
 
 ---
 
@@ -14,34 +16,54 @@ A API gerencia tarefas e expõe métricas de integridade (*Health Check*), simul
 
 ## 2. Especificação das Rotas e Endpoints
 
-| Método | Rota | Descrição | Status de Sucesso |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Verificação de integridade do serviço (*Health Check* para deploy/orquestrador) | `200 OK` |
-| `GET` | `/api/info` | Metadados da aplicação, versão e ambiente ativo | `200 OK` |
-| `GET` | `/api/tarefas` | Retorna a listagem de todas as tarefas cadastradas | `200 OK` |
-| `GET` | `/api/tarefas/:id` | Busca os dados de uma tarefa específica por ID | `200 OK` (ou `404`) |
-| `POST` | `/api/tarefas` | Cadastra uma nova tarefa (`{ "titulo": string }`) | `201 Created` (ou `400`) |
+| Método | Rota | Descrição | Status de Sucesso | Tratamento de Erros |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Verificação de integridade do serviço (*Health Check* para deploy/orquestrador) | `200 OK` | N/A (Sempre 200 se ativo) |
+| `GET` | `/api/info` | Metadados da aplicação, versão (1.0.0) e ambiente ativo | `200 OK` | N/A |
+| `GET` | `/api/tarefas` | Retorna a listagem de todas as tarefas cadastradas na memória | `200 OK` (Array) | N/A |
+| `GET` | `/api/tarefas/:id` | Busca os dados detalhados de uma tarefa específica por ID | `200 OK` | `404` (Não encontrada) |
+| `POST` | `/api/tarefas` | Cadastra nova tarefa via JSON `{ "titulo": string }` com sanitização | `201 Created` | `400` (Título ausente/vazio/inválido) |
 
 ---
 
-## 3. Como a API se Conecta aos 5 Requisitos do Seminário
+## 3. Como a Solução Atende aos 5 Requisitos do Seminário
 
-Esta base de código foi projetada para alimentar diretamente os 5 pilares exigidos pelo professor:
+A esteira automatizada substitui o Gitea de ponta a ponta sem dependência de ferramentas externas adicionais:
 
 1. **Armazenamento de Código-Fonte (Requisito 1):**
-   - Repositório centralizado com histórico de commits, `.gitignore` adequado e política de branches (`main` protegida e `develop`).
+   - Repositório centralizado no GitHub com histórico rastreável, Conventional Commits e governança via `.gitignore` e `.dockerignore`.
+   - Política de branches protegidas (`main` protegida com bloqueio de push direto e obrigatoriedade de PR + status checks).
 2. **Construção de Imagens Docker (Requisito 2):**
-   - Possui `Dockerfile` multi-stage/enxuto baseado em `node:20-alpine`, com usuário não-root e aproveitamento de cache de camadas.
+   - Workflow do GitHub Actions (`.github/workflows/ci-cd.yml`) utilizando Docker Buildx e cache de camadas da nuvem (`type=gha`).
+   - Imagem otimizada baseada em `node:20-alpine` com usuário não-root `node` e tamanho de ~140 MB.
 3. **Execução de Testes Automáticos (Requisito 3):**
-   - Contém suíte de testes com **Jest** e **Supertest** (`npm test`), validando contratos de rotas e health check antes de qualquer build.
+   - Suíte de 9 testes automatizados com **Jest** e **Supertest** (`npm test`), validando 100% dos cenários de sucesso e caminhos de erro.
+   - Quality Gate: O pipeline interrompe imediatamente se qualquer teste falhar, impedindo o build da imagem.
 4. **Armazenamento em Container Registry (Requisito 4):**
-   - Imagem construída pelo pipeline é tagueada (ex: `:latest` e `:commit-hash`) e enviada ao Registry integrado da ferramenta.
-5. **Implantação Automatizada (Requisito 5):**
-   - O container é publicado e atualizado em um ambiente de execução (servidor/Docker Host), com o orquestrador validando a rota `/health` para confirmar o sucesso do deploy.
+   - Publicação automatizada no **GitHub Container Registry (`ghcr.io/eduus06/api-seminario-cicd`)**.
+   - Dupla estratégia de tags: `:latest` (para rastreio da versão estável) e `:<short-sha>` (imutável, vinculada ao commit do Git).
+   - Autenticação nativa e segura com `GITHUB_TOKEN`, sem necessidade de expor credenciais externas.
+5. **Implantação Automatizada com Health Check & Rollback (Requisito 5):**
+   - Execução do script orquestrador `scripts/deploy.sh` em ambiente de execução de containers.
+   - Sondagem ativa na rota `/health` com até 15 tentativas a cada 2 segundos.
+   - Mecanismo de **Rollback Automático**: se o health check falhar, o script restaura imediatamente a versão anterior estável sem indisponibilidade.
 
 ---
 
-## 4. Execução Local
+## 4. Estrutura do Pipeline no GitHub Actions
+
+A esteira está dividida em 3 jobs sequenciais:
+
+```
+[ Job 1: Testes (Req 3) ] ➔ [ Job 2: Build Docker (Req 2) & Registry (Req 4) ] ➔ [ Job 3: Deploy Automatizado (Req 5) ]
+```
+
+* **Gatilhos:** Disparado em `push` nas branches `main` e `develop`, e em `pull_request` para a `main`.
+* **Deploy:** Executado exclusivamente após o merge na branch `main`.
+
+---
+
+## 5. Execução Local
 
 ### Pré-requisitos
 * Node.js 18+ ou 20+ instalado.
@@ -49,10 +71,10 @@ Esta base de código foi projetada para alimentar diretamente os 5 pilares exigi
 
 ### Passos
 ```bash
-# 1. Instalar dependências (incluindo dependências de desenvolvimento para testes)
+# 1. Instalar dependências
 npm install
 
-# 2. Executar suíte de testes automatizados
+# 2. Executar suíte de testes automatizados (9 testes)
 npm test
 
 # 3. Iniciar o servidor localmente
@@ -62,24 +84,15 @@ A API estará acessível em: `http://localhost:3000`
 
 ---
 
-## 5. Execução via Docker (Local)
-
-Para testar o empacotamento antes de rodar na esteira:
+## 6. Execução via Docker (Local)
 
 ```bash
-# 1. Construir a imagem Docker localmente
+# 1. Construir a imagem Docker
 docker build -t api-seminario-cicd:latest .
 
-# 2. Executar o container mapeando a porta 3000
+# 2. Executar o container na porta 3000
 docker run -d -p 3000:3000 --name api-teste api-seminario-cicd:latest
 
-# 3. Testar a rota de health check
+# 3. Validar a rota de health check
 curl http://localhost:3000/health
 ```
-
----
-
-## 6. Estrutura de Branches Recomendada
-
-* `main`: Código estável em produção. Protegida contra commits diretos (exige Pull/Merge Request e aprovação do pipeline de testes).
-* `develop` / `feature/*`: Branches de desenvolvimento onde os integrantes enviam novas alterações.
