@@ -23,9 +23,13 @@ USER node
 # Porta padrão exposta pelo container
 EXPOSE 3000
 
+# Commit de origem da imagem (injetado pelo pipeline via --build-arg)
+ARG GIT_SHA=local
+
 # Variáveis de ambiente padrão
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV GIT_SHA=${GIT_SHA}
 
 # Comando de inicialização
 CMD ["node", "src/server.js"]

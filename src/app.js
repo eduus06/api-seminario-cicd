@@ -29,7 +29,8 @@ app.get('/api/info', (req, res) => {
     projeto: 'N2 - Seminário CI/CD',
     descricao: 'API para demonstração de esteira automatizada em substituição ao Gitea',
     ambiente: process.env.NODE_ENV || 'development',
-    versao: '1.0.0'
+    versao: '1.0.0',
+    commit: process.env.GIT_SHA || 'local'
   });
 });
 

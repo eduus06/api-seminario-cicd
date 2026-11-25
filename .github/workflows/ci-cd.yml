@@ -16,7 +16,6 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   CONTAINER_NAME: api-seminario-cicd
-  HOST_PORT: 3000
   CONTAINER_PORT: 3000
 
 permissions:
@@ -71,6 +70,8 @@ jobs:
           context: .
           file: ./Dockerfile
           load: true
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.image_tag }}
           tags: |
             ${{ steps.meta.outputs.image_name }}:latest
             ${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}
@@ -81,17 +82,6 @@ jobs:
         run: |
           echo "=== Imagens construídas no passo de Build ==="
           docker images "${{ steps.meta.outputs.image_name }}"
-
-      - name: Exportar imagem como artefato para o estágio de Deploy
-        run: |
-          docker save "${{ steps.meta.outputs.image_name }}:latest" -o /tmp/api-seminario-cicd.tar
-
-      - name: Publicar artefato da imagem para o job de Deploy
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-artifact
-          path: /tmp/api-seminario-cicd.tar
-          retention-days: 1
 
       - name: Autenticar no GitHub Container Registry (Requisito 4)
         if: github.event_name != 'pull_request'
@@ -108,42 +98,72 @@ jobs:
           docker push "${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.image_tag }}"
 
   deploy:
-    name: "3. Deploy Automatizado & Health Check (Req 5)"
+    name: "3. Deploy na VM via SSH & Health Check (Req 5)"
     needs: build-docker
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT || '22' }}
+      APP_PORT: ${{ vars.APP_PORT || '3000' }}
+      IMAGE_NAME: ${{ needs.build-docker.outputs.image_name }}
+      IMAGE_TAG: ${{ needs.build-docker.outputs.image_tag }}
     steps:
       - name: Checkout do código-fonte (obter scripts/deploy.sh)
         uses: actions/checkout@v4
 
-      - name: Baixar artefato da imagem Docker construída no Estágio 2
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image-artifact
-          path: /tmp
-
-      - name: Carregar imagem Docker no ambiente de execução
-        run: |
-          docker load -i /tmp/api-seminario-cicd.tar
-
-      - name: Garantir permissão de execução no script de Deploy
-        run: chmod +x ./scripts/deploy.sh
-
-      - name: Executar script de Deploy Automatizado (Requisito 5)
+      - name: Validar configuração dos secrets de deploy
         env:
-          IMAGE_NAME: ${{ needs.build-docker.outputs.image_name }}
-          IMAGE_TAG: "latest"
-          CONTAINER_NAME: ${{ env.CONTAINER_NAME }}
-          HOST_PORT: ${{ env.HOST_PORT }}
-          CONTAINER_PORT: ${{ env.CONTAINER_PORT }}
-          SKIP_PULL: "true"
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          ./scripts/deploy.sh
+          for v in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Secret ${v} não configurado. Veja a seção 'Configuração do ambiente de deploy' no README."
+              exit 1
+            fi
+          done
 
-      - name: Verificação final dos endpoints publicados (/health e /api/info)
+      - name: Configurar chave SSH de acesso à VM
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          echo "=== Teste de Fumaca Pós-Deploy (/api/info) ==="
-          curl -fsS "http://localhost:${{ env.HOST_PORT }}/api/info"
-          echo ""
-          echo "=== Status do Container em Execução ==="
-          docker ps --filter "name=${{ env.CONTAINER_NAME }}"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${DEPLOY_SSH_PORT}" -H "${DEPLOY_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<EOF
+          Host vm-deploy
+            HostName ${DEPLOY_HOST}
+            User ${DEPLOY_USER}
+            Port ${DEPLOY_SSH_PORT}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Enviar script de deploy para a VM
+        run: |
+          ssh vm-deploy 'mkdir -p ~/api-seminario-cicd'
+          scp scripts/deploy.sh vm-deploy:~/api-seminario-cicd/deploy.sh
+
+      - name: Executar deploy na VM (docker pull do GHCR + health check + rollback)
+        run: |
+          ssh vm-deploy \
+            "IMAGE_NAME='${IMAGE_NAME}' IMAGE_TAG='${IMAGE_TAG}' HOST_PORT='${APP_PORT}' \
+             CONTAINER_NAME='${{ env.CONTAINER_NAME }}' CONTAINER_PORT='${{ env.CONTAINER_PORT }}' \
+             bash ~/api-seminario-cicd/deploy.sh"
+
+      - name: Teste de fumaça externo (acesso público à API implantada)
+        run: |
+          URL="http://${DEPLOY_HOST}:${APP_PORT}"
+          echo "=== GET ${URL}/health ==="
+          curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "${URL}/health"; echo
+          echo "=== GET ${URL}/api/info ==="
+          RESP="$(curl -fsS "${URL}/api/info")"; echo "${RESP}"
+          echo "${RESP}" | grep -q "\"commit\":\"${IMAGE_TAG}\"" \
+            || { echo "::error::A API publicada não está rodando o commit ${IMAGE_TAG}"; exit 1; }
+          echo "Versão implantada confere com o commit ${IMAGE_TAG}."
+
+      - name: Remover chave SSH do runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
