@@ -23,6 +23,7 @@ describe('Suíte de Testes Automatizados - Validação do Pipeline CI/CD (Requis
       expect(res.body).toHaveProperty('descricao');
       expect(res.body).toHaveProperty('ambiente');
       expect(res.body).toHaveProperty('versao', '1.0.0');
+      expect(typeof res.body.commit).toBe('string');
     });
   });
 
